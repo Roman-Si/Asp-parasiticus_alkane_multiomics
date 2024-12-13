@@ -1,0 +1,270 @@
+---
+title: "RNAseq analysis of Aspergillus Parasiticus MM36 grown with alkanes"
+author: "Romanos Siaperas"
+date: today
+format: 
+  html:
+    self-contained: true
+editor: visual
+toc-title: "Sections"
+toc: true
+number-sections: true
+---
+
+## Introduction
+
+### The paper
+
+*Aspergillus parasiticus* MM36, isolated from *T. molitor* intestines, can grow using a mixture of long-chain alkanes (lcAlk), ranging from C24 to C36, as the sole carbon source. Additionally, its lcAlk-induced secretome can cause structural modifications on polyethylene (Taxeidis et al., 2023)​. To gain deeper insights into this strain’s capabilities, we employed a multi-omics approach, starting with genome sequencing, assembly and annotation. We performed RNAseq to investigate the molecular response during lcAlk assimilation. Secretome analysis with LC-MS/MS provided further insights into the enzymes involved in lcAlk and PE modification. This offers a comprehensive view of alkane metabolism by filamentous fungi, highlighting its relevance to plastic degradation. 
+
+Total RNA was extracted from each timepoint in triplicates by Novogene, the polyA+ fraction was purified, and libraries were constructed with the Novogene NGS RNA Library Prep Set (PT042)\* kit and sequenced in paired-end mode on a NovaSeq 6000. One hexadecane sample with a RIN value of 3.7 was discarded leaving this condition with two replicates. Raw data were processed using nf-core/rnaseq v3.10.1 (10.5281/zenodo.1400710) of the nf-core collection of workflows ​(Ewels et al., 2020)​ at the high-performance computing bioinformatics platform of HCMR (Crete, Greece) ​(Zafeiropoulos et al., 2021)​.
+
+### The data
+
+-   The salmon quantification data and the salmon_tx2gene.tsv (mapping of isoforms to genes, in this annotation there is one isoform per gene) have been deposited to the NCBI Gene Expression Omnibus (GEO) database with the dataset identifier [GSE282836](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE282836).
+
+-   The genome project is in GenBank with accession [JAWDVE000000000](https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_037075405.1/).
+
+-   [go‐basic.obo](https://release.geneontology.org/2023-04-01/ontology/go-basic.obo)
+
+**When published will add links to download the files from GEO ftp and a script to download all data.**
+
+### The analysis
+
+We have three conditions with three or two replicates. The conditions are:
+
+-   secretome after growth with long-chain alkanes for 2 days (lcAlk_2d) with 3 replicates
+
+-   secretome after growth with long-chain alkanes for 3 days (lcAlk_3d) with 3 replicates
+
+-   secretome after growth with hexadecane for 3 days (C16_3d) with 2 replicates (one was discarded due to low RIN)
+
+The data analysis will start with the salmon transcript-level counts, the output of nf-core/rnaseq v3.10.1:
+
+-   one quant.sf.gz file per sample
+
+-   the mapping of isoforms to genes salmon_tx2gene.tsv.gz (here we have one per gene)
+
+Raw counts will be loaded in edgeR v3.43.4 and all subsequent normalization and differential expression testing will be with edgeR. The enrichment analysis of gene-ontology (GO) terms in the end will be with goatools v1.3.1 and go‐basic.obo release 2023‐04‐01. The GO annotations are derived from Interproscan and are saved in [data/functional/GOassociation](https://github.com/Roman-Si/Asp-parasiticus_alkane_multiomics/blob/main/data/functional/GOassociation).
+
+## Load data
+
+Raw counts will be loaded in edgeR v3.43.4.
+
+```{r}
+#| label: load_libraries
+#| echo: true 
+#| output: false 
+
+library(edgeR)
+library(tidyverse)
+library(tximport)
+
+
+samples <- c("C16_D3B", "C16_D3C","Alkanes_D2A", "Alkanes_D2B", "Alkanes_D2C", "Alkanes_D3A", "Alkanes_D3B", "Alkanes_D3C")
+conditions <- factor(sub(".$", "", samples))
+
+### Summarize transcript-level salmon output to gene-level with tximport
+files <- paste("data/RNAseq/", samples, ".quant.sf.gz", sep = "")
+names(files) <- samples
+tx2gene <- read.csv("data/RNAseq/salmon_tx2gene.tsv.gz", sep = '\t', header = FALSE)
+txi <- tximport(files, type = "salmon", tx2gene = tx2gene)
+sampleTable <- data.frame(condition = factor(conditions))
+rownames(sampleTable) <- colnames(txi$counts)
+
+```
+
+```{r}
+#| label: fig-raw_data
+#| fig-subcap:
+#|   - "Density of log2 raw data"
+#|   - "MDS of log2 raw data"
+
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| column: page
+#| echo: true
+
+##### Load in edgeR to run edgeR-exact followwing recomemendations for few replicates 10.1261/rna.053959.115.  ####
+cts <- txi$counts
+paste("Genes with 0 counts in all samples:", sum(rowSums(cts) == 0))
+
+normMat <- txi$length
+limma::plotDensities(log2(cts), main = "")
+limma::plotMDS(log2(cts), col = c(rep(c("blue", "blue")),rep(c('red', 'orange'), each = 3) ), main = "")
+```
+
+## Filter & TMM normalize
+
+Raw counts were loaded in edgeR v3.43.4 and were normalized using the TMM normalization ​(Robinson et al., 2010)​. Based on Chen et. al. ​(Chen et al., 2016)​ genes with low expression were excluded. Specifically, only genes with more than 10/L reads, where L = 16,66 represents the median library size in millions, in at least two replicates of any condition were retained for downstream analysis. 11964 genes (86%) passed this filtering.
+
+```{r}
+#| label: fig-MD
+#| layout-ncol: 4
+#| layout-nrow: 2
+#| column: page
+#| echo: true
+
+# Obtaining per-observation scaling factors for length, adjusted to avoid changing the magnitude of the counts.
+normMat <- normMat/exp(rowMeans(log(normMat)))
+normCts <- cts/normMat
+
+# Computing effective library sizes from scaled counts, to account for composition biases between samples.
+eff.lib <- calcNormFactors(normCts) * colSums(normCts)
+
+# Combining effective library sizes with the length factors, and calculating offsets for a log-link GLM.
+normMat <- sweep(normMat, 2, eff.lib, "*")
+normMat <- log(normMat)
+
+# Creating a DGEList object for use in edgeR.
+y <- DGEList(cts, group = conditions)
+y <- scaleOffset(y, normMat)
+all_genes_count <-  y$counts %>% nrow()
+
+# Keep genes present in 2 samples of at least one condition ####
+# cpm threshold is 10/L where L is the median libraly size in millions
+CPM.Cutoff <- 10 / median(y$samples$lib.size) *1e6
+#print(paste0(CPM.Cutoff," is the CPM cutoff."))
+
+keep_1 <- rowSums(cpm(y[,1:2]) > CPM.Cutoff) >= 2 - 1e-14
+keep_2 <- rowSums(cpm(y[,3:5]) > CPM.Cutoff) >= 2 - 1e-14
+keep_3 <- rowSums(cpm(y[,6:8]) > CPM.Cutoff) >= 2 - 1e-14
+all_y <- y
+y <- y[keep_1 | keep_2 | keep_3, , keep.lib.sizes=FALSE]
+filtered_genes_count <-  y$counts %>% nrow()
+# save the genes passing the filtering, they are the background population for enrichment analysis later
+write.table(rownames(y$counts), file = "results/RNAseq/population", row.names = FALSE, col.names = FALSE, quote = FALSE)
+
+### MD plots
+plotMD(y, column=1)
+abline(h=0, col="red", lty=2, lwd=2)
+plotMD(y, column=2)
+abline(h=0, col="red", lty=2, lwd=2)
+plotMD(y, column=3)
+abline(h=0, col="red", lty=2, lwd=2)
+plotMD(y, column=4)
+abline(h=0, col="red", lty=2, lwd=2)
+plotMD(y, column=5)
+abline(h=0, col="red", lty=2, lwd=2)
+plotMD(y, column=6)
+abline(h=0, col="red", lty=2, lwd=2)
+plotMD(y, column=7)
+abline(h=0, col="red", lty=2, lwd=2)
+plotMD(y, column=8)
+abline(h=0, col="red", lty=2, lwd=2)
+
+#print(paste0(filtered_genes_count," genes passed the filtering (", round(filtered_genes_count / all_genes_count, 2) * 100, "%)"))
+
+```
+
+## Differential expression testing
+
+Differential expression (DE) was tested with the edgeR-exact test following recommendations for few replicates ​(Schurch et al., 2016)​. The p-value was adjusted with the Benjamini-Hochberg (B-H) correction and corresponds to an FDR of 5 %.
+
+```{r}
+#| label: fig-DE
+#| layout-ncol: 1
+#| fig-cap: "Biological coefficient of variation"
+#| column: page
+#| echo: true
+
+
+# create design
+design <- model.matrix(~0+ conditions)
+colnames(design) <- levels(conditions)
+
+# estimate dispersion
+y <- estimateDisp(y, design, robust=TRUE)
+plotBCV(y)
+
+# The first part of the pair is the control of the comparison
+contrast_pairs <- list(c("C16_D3", "Alkanes_D3"), c("Alkanes_D2", "Alkanes_D3"), c("C16_D3","Alkanes_D2"))
+
+### Run exactTest
+
+for (pair in contrast_pairs) {  
+  # I prefer the control as second
+  contrast_name <- paste(pair[2], "vs", pair[1], sep = "_")
+  et <- exactTest(y, pair = pair)
+  # no logFC threshold
+  is.de <- decideTests(et, adjust.method = "BH", p.value = 0.05, lfc = 0)
+  print(summary(is.de))
+  
+  # save up and downregulated genes of each comparison for enrichment analysis afterwards
+  # the output of decideTests is 1 for upregulated, 0 for noDiff and -1 for downregulated
+  write.table(rownames(is.de)[is.de[, paste(pair[2], pair[1], sep = "-")] == 1], file = paste("results/RNAseq/", contrast_name, "_up", sep = ""), row.names = FALSE, col.names = FALSE, quote = FALSE)
+  write.table(rownames(is.de)[is.de[, paste(pair[2], pair[1], sep = "-")] == -1], file = paste("results/RNAseq/", contrast_name, "_down", sep = ""), row.names = FALSE, col.names = FALSE, quote = FALSE)
+  
+  # save dataframe with detailed DE results as well (logFC, p-value etc)
+  data_de <- data.frame(topTags(et, n = et$table %>% nrow()))
+  data_de$GeneID <- rownames(data_de)
+  write.csv(data_de,paste( "results/RNAseq/edgeR_exactTest_", contrast_name, ".csv", sep = ""), row.names = FALSE )
+}
+```
+
+## Gene-ontology enrichment analysis
+
+Enrichment of gene ontology (GO) terms was tested with goatools v1.3.1 ​(Klopfenstein et al., 2018)​ with the go‐basic.obo release 2023‐04‐01 using Fisher's exact test with 5 % B-H FDR. GO terms were derived from the Interproscan annotations using function interproscan_df_to_go_df from <https://github.com/Roman-Si/ProtAnnoScripts> . go-basic.obo was downloaded from <https://release.geneontology.org/2023-04-01/ontology/>.
+
+```{bash}
+# bash code
+# activate the conda environment where GOATOOLS is installed
+source ~/miniforge3/bin/activate
+
+# iterate over each group of DEGs and test them with GOATOOLS
+for file in results/RNAseq/Alkanes_D*; do
+  base_name=$(basename "$file")
+  output_file="results/RNAseq/GO_${base_name}.csv"
+  echo $file
+  # Run GOATOOLS
+  find_enrichment.py --pval=0.05 --pval_field=fdr_bh --method=fdr_bh \
+                     --outfile=$output_file --ns=BP,MF --indent \
+                     $file results/RNAseq/population data/functional/GOassociation | grep -v WARNING | grep -v skipped # to avoid obsolete GO terms warnings
+
+done
+```
+
+```{r}
+#| label: fig-GO
+#| layout-ncol: 1
+#| layout-nrow: 4
+#| fig-width: 12
+#| column: page
+#| echo: true
+
+go_files <- list.files(path = "results/RNAseq", pattern = "^GO_.*\\.csv$", full.names = TRUE)
+
+for (file in go_files) {
+  go_df  <- read.csv(file, sep = "\t", header = TRUE) 
+  # do not plot purified terms
+  go_df <- go_df %>% filter(enrichment == "e")
+  if (nrow(go_df) > 0) {
+    # The ratios are given / separated, take the first part that is your count
+    go_df <- go_df %>% mutate(
+                            count_in_study = as.numeric(str_extract(ratio_in_study, "^[0-9]+")),
+                            count_in_population = as.numeric(str_extract(ratio_in_pop, "^[0-9]+")))
+    go_df$enrich_ratio <- go_df$count_in_study / go_df$count_in_population
+  
+    p <- ggplot(go_df, aes(x = enrich_ratio, y = name, size = count_in_study)) +
+      geom_point(alpha = 0.8) +
+      labs(
+      title = strsplit(basename(file), ".", fixed = TRUE)[[1]][1],
+      x = "Rich factor (% of induced genes)",
+      y = "",
+      size = "Gene number") +
+    theme_minimal() + 
+    theme(axis.text.y = element_text(hjust = 0.5))
+    
+    print(p)
+  }
+}
+
+
+```
+
+```{r}
+#| label: print_libraries
+#| include: true
+
+print(sessionInfo())
+```
