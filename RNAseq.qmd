@@ -162,7 +162,7 @@ abline(h=0, col="red", lty=2, lwd=2)
 Differential expression (DE) was tested with the edgeR-exact test following recommendations for few replicates ​(Schurch et al., 2016)​. The p-value was adjusted with the Benjamini-Hochberg (B-H) correction and corresponds to an FDR of 5 %.
 
 ```{r}
-#| label: fig-DE
+#| label: fig-BCV
 #| layout-ncol: 1
 #| fig-cap: "Biological coefficient of variation"
 #| column: page
@@ -176,6 +176,19 @@ colnames(design) <- levels(conditions)
 # estimate dispersion
 y <- estimateDisp(y, design, robust=TRUE)
 plotBCV(y)
+```
+
+```{r}
+#| label: fig-DE
+#| layout-ncol: 3
+#| layout-nrow: 2
+#| fig-subcap:
+#|   - "Alkanes_D3 vs C16_D3"
+#|   - "Alkanes_D3 vs Alkanes_D2"
+#|   - "Alkanes_D2 vs C16_D3"
+#| column: page
+#| echo: true
+
 
 # The first part of the pair is the control of the comparison
 contrast_pairs <- list(c("C16_D3", "Alkanes_D3"), c("Alkanes_D2", "Alkanes_D3"), c("C16_D3","Alkanes_D2"))
@@ -190,6 +203,7 @@ for (pair in contrast_pairs) {
   is.de <- decideTests(et, adjust.method = "BH", p.value = 0.05, lfc = 0)
   print(summary(is.de))
   
+  plotMD(et, status=is.de, values=c(1,-1), col=c("red","blue"), main =  "")
   # save up and downregulated genes of each comparison for enrichment analysis afterwards
   # the output of decideTests is 1 for upregulated, 0 for noDiff and -1 for downregulated
   write.table(rownames(is.de)[is.de[, paste(pair[2], pair[1], sep = "-")] == 1], file = paste("results/RNAseq/", contrast_name, "_up", sep = ""), row.names = FALSE, col.names = FALSE, quote = FALSE)
