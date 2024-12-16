@@ -1,0 +1,396 @@
+---
+title: "Proteomic analysis of A. parasiticus secretomes grown with alkanes"
+author: "Romanos Siaperas"
+date: today
+format: 
+  html:
+    self-contained: true
+editor: visual
+toc-title: "Sections"
+toc: true
+number-sections: true
+---
+
+## Introduction
+
+### The paper
+
+*Aspergillus parasiticus* MM36, isolated from *T. molitor* intestines, can grow using a mixture of long-chain alkanes (lcAlk), ranging from C24 to C36, as the sole carbon source. Additionally, its lcAlk-induced secretome can cause structural modifications on polyethylene (Taxeidis et al., 2023)​. To gain deeper insights into this strain’s capabilities, we employed a multi-omics approach, starting with genome sequencing, assembly and annotation. We performed RNAseq to investigate the molecular response during lcAlk assimilation. Secretome analysis with LC-MS/MS provided further insights into the enzymes involved in lcAlk and PE modification. This offers a comprehensive view of alkane metabolism by filamentous fungi, highlighting its relevance to plastic degradation. 
+
+### The data
+
+-   The mzTab file sdrf_openms_design_openms.mzTab.gz
+
+-   The msstats input file sdrf_openms_design_msstats_in.csv.gz
+
+-   The proteome fasta file used for the analysis
+
+The mass spectrometry proteomics data have been deposited to the ProteomeXchange Consortium via the PRIDE ​(Perez-Riverol et al., 2022)​ partner repository with the dataset identifier PXD058271 and 10.6019/PXD058271.
+
+**When published will add links to download the files from PRIDE ftp and a script to download all data.**
+
+### The analysis
+
+We have **three conditions** with three replicates each. The conditions are:
+
+-   secretome after growth with long-chain alkanes for 2 days (lcAlk_2d)
+
+-   secretome after growth with long-chain alkanes for 3 days (lcAlk_3d)
+
+-   secretome after growth with hexadecane for 3 days (C16_3d)
+
+The steps:
+
+-   Get some info about proteins and PTMs from mzTab
+
+-   Import peptide level intensities in prolfqua
+
+-   Normalization at peptide level
+
+-   Protein aggregation
+
+-   Differential protein abundance testing
+
+-   Filter reliably quantified proteins
+
+## Load libraries and data
+
+```{r}
+#| label: load_libraries
+#| echo: true 
+#| output: false 
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(prolfqua)
+library(RscriptsForProteomics)
+library(ggVennDiagram)
+
+# mzTab
+mzt <-"data/MS/sdrf_openms_design_openms.mzTab.gz"
+# msstats input
+data <- read.csv("data/MS/sdrf_openms_design_msstats_in.csv.gz", header = TRUE, sep = ',')
+# change file.names
+replacements <- c(
+  "B28857_Ap_IonOpt_PRC-6150_shotgun-1.mzML" = "alk_2d_r1",
+  "B28859_Ap_IonOpt_PRC-6150_shotgun-2.mzML" = "alk_2d_r2",
+  "B28861_Ap_IonOpt_PRC-6150_shotgun-3.mzML" ="alk_2d_r3",
+  "B28863_Ap_IonOpt_PRC-6150_shotgun-4.mzML" = "c16_3d_r1",
+  "B28865_Ap_IonOpt_PRC-6150_shotgun-5.mzML" = "c16_3d_r2",
+  "B28867_Ap_IonOpt_PRC-6150_shotgun-6.mzML" = "c16_3d_r3",
+  "B28869_Ap_IonOpt_PRC-6150_shotgun-7.mzML" = "alk_3d_r1",
+  "B28871_Ap_IonOpt_PRC-6150_shotgun-8.mzML" = "alk_3d_r2",
+  "B28873_Ap_IonOpt_PRC-6150_shotgun-9.mzML" = "alk_3d_r3"
+)
+data$Reference <- replacements[data$Reference]
+head(data, 2)
+```
+
+These two functions parse the mzTab and msstats_input to get some stats for each protein like number of PSMs, peptides etc
+
+```{r}
+#| echo: true 
+
+### Take mzTab info
+prot_info <- extract_protein_stats(mzt)
+head(prot_info, 2)
+proteomicslfq_ids_to_keep <- get_proteinIds_from_proteomicslfq(mzt)
+
+### Take peptide info
+pep_info <- extract_peptides_per_protein("data/MS/sdrf_openms_design_msstats_in.csv.gz", "data/apar_HaoContaminants.fasta.gz")
+head(pep_info, 2)
+
+```
+
+## Peptide level analysis
+
+### PTMs
+
+Will plot the frequency of each post-translational modification separate and then all possible combinations of them. This info will be taken from the mzTab file.
+
+```{r}
+#| label: fig-PTMs
+#| layout-ncol: 1
+#| layout-nrow: 2
+#| fig-subcap:
+#|   -  "Frequency of each separate PTM"
+#|   - "Frequency of each combination of PTMs"
+#| column: page
+#| echo: true
+
+
+count_peptide_modifications(mzt,  plot_type = "separate")
+count_peptide_modifications(mzt,  plot_type = "mixed")
+
+```
+
+### EDA peptide-level
+
+Import peptide intensities in prolfqua and make some exploratory plots. First will plot cumulative missing values per peptide and the peptide intensities for each biological condition for peptides with 0-2 missing values.
+
+```{r}
+#| echo: true 
+#| output: false 
+
+# Import msstats input in prolfqua 
+lfqdata <- create_lfqdata(data)
+
+# raw density plot
+density_raw_pep <- lfqdata$get_Plotter()$intensity_distribution_density() 
+
+# missing values per group
+p1_mv <- lfqdata$get_Summariser()$plot_missingness_per_group()
+p2_mv <- lfqdata$get_Plotter()$missigness_histogram() 
+```
+
+```{r}
+#| echo: true 
+
+knitr::kable(lfqdata$hierarchy_counts(), caption = "number of proteins and peptides.")
+```
+
+```{r}
+#| label: fig-pepMVs
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| fig-subcap:
+#|   -  "Cumulative peptide MVs per condition"
+#|   - "Density of peptides with 0, 1 or 2 MVs per condition."
+#| echo: true
+
+p1_mv 
+p2_mv
+```
+
+We see a clear distinction of the distributions for peptides with and without missing value. The fact that peptides with missing values have a left-shifted distribution is an indication that missing values are due to low abundance. This is a check to use the imputation of missing values around the limit of detection (LOD) for differential abundance testing later.
+
+```{r}
+#| echo: true 
+#| output: false 
+stats <- lfqdata$get_Stats()
+prolfqua::table_facade( stats$stats_quantiles()$wide, paste0("quantile of ",stats$stat ))
+p1 <- stats$density_median() + labs(tag = "A)") 
+p2 <-  stats$violin() + labs(tag = "B)") 
+```
+
+```{r}
+#| label: fig-pepCV
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| fig-subcap:
+#|   -  "Density of most/least variable peptides"
+#|   - "Violit plot of peptide coefficient of variation"
+#| echo: true
+
+p1 
+p2
+```
+
+Next, peptide abundances are log2 transformed and robust z-score scaled using the method robscale.
+
+```{r}
+#| label: fig-normalized
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| fig-subcap:
+#|   -  "Density of raw peptide intensities"
+#|   - "Density of log2 robscaled peptide intensities"
+#| echo: true
+
+lt <- lfqdata$get_Transformer()
+lfqdataPeptideNorm <- lt$log2()$robscale()$lfq 
+
+density_raw_pep
+pl <-  lfqdataPeptideNorm$get_Plotter()
+pl$intensity_distribution_density()
+```
+
+```{r}
+#| label: fig-pepPCA
+#| include: true
+
+pl$pca()
+
+pep_data <- data.frame(lfqdataPeptideNorm$to_wide()$data)
+#save_gzipped_csv(data.frame(pep_data), "results/MS/robscaled_peptide_intensities.csv.gz")
+```
+
+The principal component analysis shows a spread of lcAlk_2d samples and a clustering of lcAlk_3d.
+
+## Protein-level analysis
+
+### Protein aggregation
+
+Protein intensities were estimated from peptide intensities using Tukey’s median polish (TMP). However, TMP summarization creates artifacts in cases where all peptides of a protein are detected uniquely in single samples, yielding misleading uniform protein intensities across all samples. This phenomenon is previously reported in microarray data summarization ​(Giorgi et al., 2010)​. For proteins affected by this artifact, median summarization of the top three peptides was employed instead.
+
+```{r}
+#| echo: true 
+#| output: false 
+
+# protein aggregation
+mp_df <- protein_aggregation(lfqdataPeptideNorm)
+# keep one protein per protein group
+mp_df <- filter_for_leading_protein(mp_df, proteomicslfq_ids_to_keep)
+# save the reliably quantified proteins in a vector for later
+mp_df_quant <- filter_proteins_by_replicates(mp_df, c("alk_2d", "alk_3d", "c16_3d"), 2)
+
+# Now turn the protein intensities in long format and import in prolfqua
+long_df <- data.frame(mp_df) %>%
+  tidyr::pivot_longer(cols = -protein_Id, names_to = "Reference", 
+               values_to = "Intensity", values_drop_na = TRUE)
+
+annot <- data.frame(colnames(mp_df %>% select(-contains('protein_Id')))) %>%
+     mutate(
+         Reference = colnames(mp_df %>% select(-contains('protein_Id'))), 
+         Run = c(1:9),
+         Condition = gsub("^(.*)_.*$", "\\1", colnames(mp_df %>% select(-contains('protein_Id')))),
+         replicate = gsub("^.*_r([1-3])$", "\\1", colnames(mp_df %>% select(-contains('protein_Id'))))
+         ) %>% 
+        select(Reference, Run, Condition, replicate)
+startdata <- dplyr::inner_join(long_df, annot, by = "Reference")
+lfqdata <- create_lfqdata(startdata, response_level = "protein", proteinId_column = "protein_Id" )
+
+pl <-  lfqdata$get_Plotter()
+p1_mv <- lfqdata$get_Summariser()$plot_missingness_per_group()
+p2_mv <- pl$missigness_histogram() + labs(tag = "B)")
+
+```
+
+### EDA protein-level
+
+#### prolfqua plots
+
+```{r}
+#| label: fig-protMVs
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| fig-subcap:
+#|   -  "Cumulative protein MVs per condition"
+#|   - "Density of proteins with 0, 1 or 2 MVs per condition."
+#| echo: true
+
+p1_mv 
+p2_mv
+```
+
+```{r}
+#| label: fig-protPCA
+#| include: true
+
+pl$pca()
+```
+
+#### Other plots
+
+For these plots will use only the reliably quantified proteins.
+
+```{r}
+#| include: true
+
+
+mp_df_quant$alk_2d <- rowMeans(mp_df_quant[, 2:4], na.rm = TRUE)
+mp_df_quant$alk_3d <- rowMeans(mp_df_quant[, 5:7], na.rm = TRUE)
+mp_df_quant$c16_3d <- rowMeans(mp_df_quant[, 8:10], na.rm = TRUE)
+
+# venn diagramm of condition overlap for quantified proteins
+quantified_proteins <- list(
+  lcAlk_2d = NULL,
+  C16_3d = NULL,
+  lcAlk_3d = NULL
+)
+
+conditions <- list(
+  lcAlk_2d = "alk_2d",
+  C16_3d = "c16_3d",
+  lcAlk_3d = "alk_3d"
+)
+
+# Loop through each element in quantified_proteins
+for (protein in names(quantified_proteins)) {
+  # Get the condition column name for the protein
+  condition_column <- conditions[[protein]]
+  
+  # Check if the condition column is not all NA
+  if (!all(is.na(mp_df_quant[[condition_column]]))) {
+    # Populate quantified_proteins with proteinId values
+    quantified_proteins[[protein]] <- mp_df_quant$protein_Id[!is.na(mp_df_quant[[condition_column]])]
+  }
+}
+
+ggVennDiagram(quantified_proteins) +
+  theme(legend.position = 'none',
+        legend.text = element_text(size = 24)) 
+```
+
+### Differential abundance analysis
+
+Differential protein abundance was tested using the empirical Bayes approach with imputation of missing values as implemented in prolfqua. Running the testing without filtering for reliably quantified proteins because they contribute to LOD estimation, will remove the unreliable proteins before saving the results.
+
+```{r}
+#| label: fig-anova
+#| include: true
+
+formula_Condition <-  strategy_lm("Intensity ~ condition_")
+Contrasts <- c("alk_3d - c16_3d" = "condition_alk_3d - condition_c16_3d",
+               "alk_3d - alk_2d" = "condition_alk_3d - condition_alk_2d",
+               "alk_2d - c16_3d" = "condition_alk_2d - condition_c16_3d")
+mod <- prolfqua::build_model(
+  lfqdata$data,
+  formula_Condition,
+  subject_Id = lfqdata$config$table$hierarchy_keys())
+mod$anova_histogram()$plot
+
+```
+
+```{r}
+#| echo: true 
+#| output: false 
+
+
+# WaldTest
+contr <- prolfqua::Contrasts$new(mod, Contrasts)
+v1 <- contr$get_Plotter()$volcano()
+
+# LOD WaldTest
+mC <- ContrastsMissing$new(lfqdata = lfqdata, contrasts = Contrasts)
+
+# merge the original unmoderated contrast and mc and moderate together
+merged  <- prolfqua::merge_contrasts_results(prefer = contr,add = mC)$merged
+merged <- prolfqua::ContrastsModerated$new(merged)
+moderated_v1_mc <- merged$get_Plotter()$volcano()
+```
+
+```{r}
+#| label: fig-volcano
+#| include: true
+
+moderated_v1_mc$FDR
+
+
+de_table <- tibble(
+  alk_3d_c16_3d_up = moderated_v1_mc$FDR$data  %>% filter(protein_Id %in% mp_df_quant$protein_Id) %>% filter(contrast == "alk_3d - c16_3d", diff > 0, FDR < 0.05) %>% nrow(),
+  alk_3d_c16_3d_down = moderated_v1_mc$FDR$data  %>% filter(protein_Id %in% mp_df_quant$protein_Id) %>% filter(contrast == "alk_3d - c16_3d", diff < 0, FDR < 0.05) %>% nrow(),
+  alk_3d_alk_2d_up =  moderated_v1_mc$FDR$data  %>% filter(protein_Id %in% mp_df_quant$protein_Id) %>% filter(contrast == "alk_3d - alk_2d", diff > 0, FDR < 0.05) %>% nrow(),
+  alk_3d_alk_2d_down =  moderated_v1_mc$FDR$data  %>% filter(protein_Id %in% mp_df_quant$protein_Id) %>% filter(contrast == "alk_3d - alk_2d", diff < 0, FDR < 0.05) %>% nrow(),
+  alk_2d_c16_3d_up =  moderated_v1_mc$FDR$data  %>% filter(protein_Id %in% mp_df_quant$protein_Id) %>% filter(contrast == "alk_2d - c16_3d", diff > 0, FDR < 0.05) %>% nrow(),
+  alk_2d_c16_3d_down =  moderated_v1_mc$FDR$data  %>% filter(protein_Id %in% mp_df_quant$protein_Id) %>% filter(contrast == "alk_2d - c16_3d", diff < 0, FDR < 0.05) %>% nrow()
+)
+knitr::kable(de_table, caption = "# of DEPs per comparison.")
+de_test <- moderated_v1_mc$FDR$data
+de_test <- de_test %>% filter(protein_Id %in% mp_df_quant$protein_Id)
+write.csv(data.frame(de_test),gzfile("results/MS/prolfqua_unfiltered_moderated_v1_mc.csv.gz"), row.names = FALSE)
+```
+
+Most differentially abundant proteins were induced in the lcAlk_3d secretomes, with 154 differing from lcAlk_2d and 7 from C16_3d, 6 of which were common. This result aligns with the FTIR analysis, which showed maximal PE modification by lcAlk_3d secretomes and activity in lcAlk_2d secretomes. 
+
+```{r}
+#| label: print_libraries
+#| include: true
+
+print(sessionInfo())
+```
