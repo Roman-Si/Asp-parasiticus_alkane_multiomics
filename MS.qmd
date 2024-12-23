@@ -87,7 +87,13 @@ data$Reference <- replacements[data$Reference]
 head(data, 2)
 ```
 
-These two functions parse the mzTab and msstats_input to get some stats for each protein like number of PSMs, peptides etc
+These two functions parse the mzTab and msstats_input to get some stats for each protein like number of PSMs, peptides etc. There are 2 different columns with peptide count:
+
+-   opt_global_nr_found_peptides: Number of peptidoforms with PSMs, each different PTM combination is counted
+
+-   nr_unmodified_peptides: Number of quantified peptides taken from msstats_input. Each peptide with and without PTMs is counted only once
+
+-   peptide_index: The min and max index of the aminoacid sequence with quantified peptides
 
 ```{r}
 #| echo: true 
@@ -101,6 +107,8 @@ proteomicslfq_ids_to_keep <- get_proteinIds_from_proteomicslfq(mzt)
 pep_info <- extract_peptides_per_protein("data/MS/sdrf_openms_design_msstats_in.csv.gz", "data/apar_HaoContaminants.fasta.gz")
 head(pep_info, 2)
 
+merged_info <- merge(prot_info, pep_info, by = "accession", all = TRUE)
+save_gzipped_csv(data.frame(merged_info), "results/MS/unfiltered_MS_data.csv.gz")
 ```
 
 ## Peptide level analysis
@@ -216,7 +224,7 @@ pl$intensity_distribution_density()
 pl$pca()
 
 pep_data <- data.frame(lfqdataPeptideNorm$to_wide()$data)
-#save_gzipped_csv(data.frame(pep_data), "results/MS/robscaled_peptide_intensities.csv.gz")
+save_gzipped_csv(data.frame(pep_data), "results/MS/robscaled_peptide_intensities.csv.gz")
 ```
 
 The principal component analysis shows a spread of lcAlk_2d samples and a clustering of lcAlk_3d.
