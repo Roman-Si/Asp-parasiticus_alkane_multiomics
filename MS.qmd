@@ -104,7 +104,7 @@ head(prot_info, 2)
 proteomicslfq_ids_to_keep <- get_proteinIds_from_proteomicslfq(mzt)
 
 ### Take peptide info
-pep_info <- extract_peptides_per_protein("data/MS/sdrf_openms_design_msstats_in.csv.gz", "data/apar_HaoContaminants.fasta.gz")
+pep_info <- extract_peptides_per_protein("data/MS/sdrf_openms_design_msstats_in.csv.gz", "data/MS/apar_HaoContaminants.fasta.gz")
 head(pep_info, 2)
 
 merged_info <- merge(prot_info, pep_info, by = "accession", all = TRUE)
