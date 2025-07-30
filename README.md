@@ -3,7 +3,7 @@
 ## What this repo contains
 Code and data for the transcriptomic and secretomic analysis of Aspergillus parasiticus MM36 grown with alkanes. This repository provides code and data for the analysis presented in the manuscript "**Multi-omics insights into the response of *Aspergillus parasiticus* to long-chain alkanes in relation to polyethylene modification**" (doi: [10.1016/j.envpol.2025.126386](https://doi.org/10.1016/j.envpol.2025.126386)).
 
-- Code is in quarto documents (.qmd) or zipped rendered html.
+- Code is in quarto documents (.qmd) and rendered html: [MS](https://htmlpreview.github.io/?https://github.com/Roman-Si/Asp-parasiticus_alkane_multiomics/blob/main/MS.html) and [RNAseq](https://htmlpreview.github.io/?https://github.com/Roman-Si/Asp-parasiticus_alkane_multiomics/blob/main/RNAseq.html)
 - Proteomic raw data, metadata and results are in PRIDE database with accession [PXD058271](https://www.ebi.ac.uk/pride/archive/projects/PXD058271)
 - Transcriptomic raw data, metadata and results are in GEO database with accession [GSE282836](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE282836)
 
